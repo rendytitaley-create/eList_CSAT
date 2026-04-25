@@ -72,15 +72,27 @@ export default function App() {
     return () => { unsubSchedules(); unsubLogs(); };
   }, []);
 
-  const handleExcelUpload = (e: any) => {
+  const handleExcelUpload = async (e: any) => {
     const file = e.target.files[0];
     const reader = new FileReader();
-    reader.onload = (evt: any) => {
+    reader.onload = async (evt: any) => {
       const data = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
-      data.forEach(async (row: any) => {
-        await addDoc(collection(db, "schedules"), { ...row, createdAt: new Date().toISOString() });
-      });
-      alert("Jadwal Berhasil Diunggah!");
+      
+      // TAMBAHKAN LOGIKA INI: Hapus jadwal lama sebelum upload baru
+      if(confirm("Upload jadwal baru akan menghapus jadwal lama di sistem. Lanjutkan?")) {
+        const q = query(collection(db, "schedules"));
+        const oldDocs = await getDocs(q);
+        
+        // Proses hapus satu per satu (karena Firestore menghapus per dokumen)
+        const deletePromises = oldDocs.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(deletePromises);
+
+        // Baru masukkan data yang baru
+        data.forEach(async (row: any) => {
+          await addDoc(collection(db, "schedules"), { ...row, createdAt: new Date().toISOString() });
+        });
+        alert("Jadwal Berhasil Diperbarui!");
+      }
     };
     reader.readAsBinaryString(file);
   };
