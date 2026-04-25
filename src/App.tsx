@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, deleteDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
 // === 1. KONFIGURASI (ISI KEMBALI DATA ANDA) ===
@@ -74,24 +74,40 @@ export default function App() {
 
   const handleExcelUpload = async (e: any) => {
     const file = e.target.files[0];
+    if (!file) return;
+
     const reader = new FileReader();
     reader.onload = async (evt: any) => {
-      const data = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
-      
-      // TAMBAHKAN LOGIKA INI: Hapus jadwal lama sebelum upload baru
-      if(confirm("Upload jadwal baru akan menghapus jadwal lama di sistem. Lanjutkan?")) {
-        const q = query(collection(db, "schedules"));
-        const oldDocs = await getDocs(q);
-        
-        // Proses hapus satu per satu (karena Firestore menghapus per dokumen)
-        const deletePromises = oldDocs.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
 
-        // Baru masukkan data yang baru
-        data.forEach(async (row: any) => {
-          await addDoc(collection(db, "schedules"), { ...row, createdAt: new Date().toISOString() });
-        });
-        alert("Jadwal Berhasil Diperbarui!");
+        if (confirm("Sistem akan memperbarui seluruh jadwal. Lanjutkan?")) {
+          // 1. Ambil semua data jadwal lama
+          const q = query(collection(db, "schedules"));
+          const querySnapshot = await getDocs(q);
+          
+          // 2. Hapus data lama satu per satu agar bersih
+          const deletePromises = querySnapshot.docs.map((doc) => deleteDoc(doc.ref));
+          await Promise.all(deletePromises);
+
+          // 3. Simpan data baru dari Excel
+          for (const row of data) {
+            await addDoc(collection(db, "schedules"), {
+              ...row,
+              createdAt: new Date().toISOString()
+            });
+          }
+          
+          alert("Jadwal Berhasil Diperbarui!");
+          // Refresh halaman agar data terbaru langsung muncul
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error("Detail Error:", error);
+        alert("Gagal upload: " + error);
       }
     };
     reader.readAsBinaryString(file);
