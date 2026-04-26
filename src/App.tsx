@@ -118,6 +118,10 @@ export default function App() {
     if (confirm("Hapus user ini selamanya?")) await deleteDoc(doc(db, "users", id));
   };
 
+  const handleDeleteLog = async (id: string) => {
+    if (confirm("Hapus data laporan uji coba ini?")) await deleteDoc(doc(db, "logs", id));
+  };
+
   const handleUploadExcel = async (type: 'schedules' | 'shifts', e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -126,8 +130,8 @@ export default function App() {
       try {
         const rawData: any[] = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
         const cleanedData = rawData.filter(row => {
-            const val = Object.values(row)[0] as string;
-            return val && !String(val).toLowerCase().includes("nama petugas");
+            const val = Object.values(row).join(" ").toLowerCase();
+            return val && !val.includes("nama petugas") && !val.includes("uraian pekerjaan");
         });
         if (confirm(`Ganti Master ${type}?`)) {
           const q = await getDocs(query(collection(db, type)));
@@ -174,7 +178,9 @@ export default function App() {
       const yMatch = d.getFullYear() === filterYear;
       const pMatch = filterPetugas === 'Semua' || String(l.petugas).toLowerCase() === filterPetugas.toLowerCase();
       const jMatch = filterJabatan === 'Semua' || l.jabatan === filterJabatan;
-      return mMatch && yMatch && pMatch && jMatch;
+      // Clean dari data sampah header
+      const isHeader = String(l.petugas).toLowerCase().includes("nama petugas");
+      return mMatch && yMatch && pMatch && jMatch && !isHeader;
     });
 
     if (filtered.length === 0) return alert("Data tidak ditemukan!");
@@ -191,7 +197,25 @@ export default function App() {
 
     if (format === 'excel') {
       const ws = XLSX.utils.json_to_sheet(dataRows);
-      ws['!cols'] = [{wch:15}, {wch:25}, {wch:12}, {wch:45}, {wch:15}, {wch:18}, {wch:50}];
+      
+      // FIX TAMPILAN: Grid & Wrapping
+      const range = XLSX.utils.decode_range(ws['!ref'] || "A1");
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cell_address = { c: C, r: R };
+          const cell_ref = XLSX.utils.encode_cell(cell_address);
+          if (!ws[cell_ref]) continue;
+          ws[cell_ref].s = {
+            border: {
+              top: { style: "thin" }, bottom: { style: "thin" },
+              left: { style: "thin" }, right: { style: "thin" }
+            },
+            alignment: { vertical: "center", horizontal: "left", wrapText: true }
+          };
+        }
+      }
+      ws['!cols'] = [{wch:15}, {wch:25}, {wch:12}, {wch:50}, {wch:15}, {wch:18}, {wch:50}];
+      
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Rekap Bulanan");
       XLSX.writeFile(wb, `Rekap_${filterPetugas}_${filterMonth}.xlsx`);
@@ -211,8 +235,8 @@ export default function App() {
                     startY: 22,
                     head: [Object.keys(dataRows[0])],
                     body: dataRows.map(r => Object.values(r)),
-                    theme: 'grid',
-                    styles: { fontSize: 7, overflow: 'linebreak' },
+                    theme: 'grid', // GRID FIX
+                    styles: { fontSize: 7, overflow: 'linebreak', cellPadding: 2 }, // WRAP FIX
                     columnStyles: { 3: { cellWidth: 80 } }
                 });
                 doc.save(`Rekap_${filterPetugas}.pdf`);
@@ -296,8 +320,8 @@ export default function App() {
                 </select></div>
               </div>
               <div className="flex gap-4 border-t pt-6">
-                <button onClick={()=>exportRekap('excel')} className="flex-1 p-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-emerald-100 transition-all active:scale-95">Download Excel</button>
-                <button onClick={()=>exportRekap('pdf')} className="flex-1 p-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-rose-100 transition-all active:scale-95">Download PDF</button>
+                <button onClick={()=>exportRekap('excel')} className="flex-1 p-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg transition-all">Download Excel (Grid+Wrap)</button>
+                <button onClick={()=>exportRekap('pdf')} className="flex-1 p-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg transition-all">Download PDF</button>
               </div>
             </div>
           )}
@@ -313,21 +337,17 @@ export default function App() {
                   <select className="p-4 bg-slate-50 rounded-2xl text-sm font-bold border-0" value={newUser.jabatan} onChange={(e)=>setNewUser({...newUser, jabatan: e.target.value})}>
                     <option value="SATPAM">SATPAM</option><option value="CS">CS</option><option value="PENGAWAS">PENGAWAS</option>
                   </select>
-                  <div className="md:col-span-2">
-                    <p className="text-[9px] font-bold text-slate-400 mb-1 uppercase">Link Foto Profil (Drive)</p>
-                    <input type="text" className="w-full p-4 bg-slate-50 rounded-2xl text-xs border-0" value={newUser.fotoUrl} onChange={(e)=>setNewUser({...newUser, fotoUrl: e.target.value})} placeholder="Paste link drive di sini" />
-                  </div>
-                  <button onClick={handleSaveUser} disabled={uploading} className="md:col-span-2 p-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg active:scale-95 transition-all">Simpan User</button>
-                  {isEditing && <button onClick={()=>{setIsEditing(null); setNewUser({nama:'',username:'',password:'',jabatan:'SATPAM',fotoUrl:''})}} className="text-xs font-bold text-red-500 uppercase">Batalkan Edit</button>}
+                  <input type="text" className="md:col-span-2 p-4 bg-slate-50 rounded-2xl text-xs border-0" value={newUser.fotoUrl} onChange={(e)=>setNewUser({...newUser, fotoUrl: e.target.value})} placeholder="Link Foto Profil (Drive)" />
+                  <button onClick={handleSaveUser} disabled={uploading} className="md:col-span-2 p-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg">Simpan User</button>
                 </div>
               </div>
-              <div className="bg-white p-6 rounded-3xl border border-slate-200 overflow-x-auto shadow-sm">
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-[10px] border-separate border-spacing-y-2">
                   <thead><tr className="text-slate-400 uppercase font-black text-[8px]"><th className="px-3">Foto</th><th>Nama</th><th>Jabatan</th><th>Pass</th><th>Aksi</th></tr></thead>
                   <tbody>
                     {allUsers.map(u => (
                       <tr key={u.id} className="bg-slate-50 rounded-xl">
-                        <td className="p-3 w-16 text-center"><img src={getDirectImg(u.fotoUrl)} className="w-8 h-8 rounded-full mx-auto object-cover border bg-white shadow-inner" onError={(e)=>e.currentTarget.src='https://ui-avatars.com/api/?name='+u.nama} /></td>
+                        <td className="p-3 w-16"><img src={getDirectImg(u.fotoUrl)} className="w-8 h-8 rounded-full object-cover border bg-white" onError={(e)=>e.currentTarget.src='https://ui-avatars.com/api/?name='+u.nama} /></td>
                         <td className="p-3 font-black text-indigo-900">{u.nama}</td>
                         <td className="p-3 uppercase font-bold text-slate-400">{u.jabatan}</td>
                         <td className="p-3 font-mono font-bold text-emerald-600">{u.password}</td>
@@ -343,21 +363,22 @@ export default function App() {
           {activeTab === 'monitoring' && (
             <div className="space-y-4 animate-in fade-in">
               {logs.map(log => (
-                <div key={log.id} className="p-5 bg-white rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col gap-2 group transition-all hover:border-indigo-200">
+                <div key={log.id} className="p-5 bg-white rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col gap-2 relative">
                    <div className="flex justify-between items-center">
-                     <div className="flex items-center gap-2">
-                       <span className="text-[10px] font-black text-indigo-700 uppercase">{log.petugas}</span>
-                       {log.type === 'tambahan' && <span className="text-[8px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-black uppercase">Insidentil</span>}
+                     <span className="text-[10px] font-black text-indigo-700 uppercase">{log.petugas} ({log.jabatan})</span>
+                     <div className="flex gap-2 items-center">
+                        <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{log.approval}</span>
+                        {/* FITUR HAPUS DATA UJI COBA */}
+                        <button onClick={()=>handleDeleteLog(log.id)} className="text-[14px] opacity-30 hover:opacity-100">🗑️</button>
                      </div>
-                     <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{log.approval}</span>
                    </div>
                    <p className="text-xs font-bold text-slate-800">{log.task}</p>
                    <p className="text-[9px] text-slate-400 font-bold uppercase">{log.jam} • {log.waktu}</p>
                    <div className="flex gap-2 mt-2">
-                     <a href={log.fotoUrl} target="_blank" className="flex-1 text-center bg-slate-100 p-3 rounded-xl text-[9px] font-black uppercase no-underline text-indigo-600 hover:bg-slate-200 transition-colors">Lihat Bukti Foto</a>
+                     <a href={log.fotoUrl} target="_blank" className="flex-1 text-center bg-slate-100 p-3 rounded-xl text-[9px] font-black uppercase text-indigo-600">Lihat Bukti Foto</a>
                      {log.approval === 'Menunggu' && (
-                       <><button onClick={() => {if(confirm("Setujui?")) handleVerify(log.id, 'Setuju')}} className="bg-emerald-600 text-white px-5 rounded-xl text-[9px] font-black uppercase shadow-sm">Setuju</button>
-                         <button onClick={() => {if(confirm("Tolak?")) handleVerify(log.id, 'Tolak')}} className="bg-rose-600 text-white px-5 rounded-xl text-[9px] font-black uppercase shadow-sm">Tolak</button></>
+                       <><button onClick={() => handleVerify(log.id, 'Setuju')} className="bg-emerald-600 text-white px-5 rounded-xl text-[9px] font-black uppercase shadow-sm">Setuju</button>
+                         <button onClick={() => handleVerify(log.id, 'Tolak')} className="bg-rose-600 text-white px-5 rounded-xl text-[9px] font-black uppercase shadow-sm">Tolak</button></>
                      )}
                    </div>
                 </div>
@@ -366,39 +387,36 @@ export default function App() {
           )}
 
           {activeTab === 'master' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white p-10 rounded-[2rem] border-2 border-dashed border-slate-200 text-center flex flex-col items-center">
-                 <div className="text-3xl mb-2 opacity-30">📂</div>
                  <p className="text-[10px] font-black text-slate-400 mb-4 uppercase italic">1. Upload List Tugas SOP (Excel)</p>
                  <input type="file" onChange={(e) => handleUploadExcel('schedules', e)} className="text-[10px] bg-slate-50 p-4 rounded-2xl w-full border" />
               </div>
               <div className="bg-white p-10 rounded-[2rem] border-2 border-dashed border-indigo-200 text-center flex flex-col items-center">
-                 <div className="text-3xl mb-2 opacity-30">📅</div>
                  <p className="text-[10px] font-black text-indigo-400 mb-4 uppercase italic">2. Upload Jadwal Shift Paten (Excel)</p>
-                 <input type="file" onChange={(e) => handleUploadExcel('shifts', e)} className="text-[10px] bg-indigo-50 p-4 rounded-2xl w-full border border-indigo-100" />
+                 <input type="file" onChange={(e) => handleUploadExcel('shifts', e)} className="text-[10px] bg-indigo-50 p-4 rounded-2xl w-full border" />
               </div>
             </div>
           )}
         </div>
       ) : (
         <div className="space-y-4 animate-in fade-in">
-          {/* TUGAS TAMBAHAN */}
           <div className="bg-white p-8 rounded-[2rem] shadow-xl border-2 border-dashed border-indigo-200">
             {!showManualTask ? (
-              <button onClick={()=>setShowManualTask(true)} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-95 transition-all">+ PEKERJAAN TAMBAHAN (INSIDENTIL)</button>
+              <button onClick={()=>setShowManualTask(true)} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100">+ PEKERJAAN TAMBAHAN (INSIDENTIL)</button>
             ) : (
-              <div className="space-y-4 animate-in zoom-in-95">
-                <input type="text" placeholder="Apa yang Anda kerjakan?" className="w-full p-4 bg-slate-50 border-0 rounded-2xl text-sm font-bold" value={manualTaskName} onChange={(e)=>setManualTaskName(e.target.value)} />
+              <div className="space-y-4">
+                <input type="text" placeholder="Uraian Kerja..." className="w-full p-4 bg-slate-50 border-0 rounded-2xl text-sm font-bold" value={manualTaskName} onChange={(e)=>setManualTaskName(e.target.value)} />
                 <div className="relative">
                     <input type="file" accept="image/*" capture="environment" onChange={(e)=>handleTaskReport(e, '', '', true)} disabled={uploading||!manualTaskName} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
                     <div className="p-5 bg-emerald-600 text-white rounded-2xl text-center font-black text-[11px] uppercase shadow-lg">📷 Ambil Foto & Kirim</div>
                 </div>
-                <button onClick={()=>setShowManualTask(false)} className="w-full text-center text-[9px] font-bold text-slate-300 uppercase tracking-widest">Batal</button>
+                <button onClick={()=>setShowManualTask(false)} className="w-full text-center text-[9px] font-bold text-slate-300 uppercase">Batal</button>
               </div>
             )}
           </div>
 
-          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic leading-none">Daftar Tugas Rutin Harian:</h3>
+          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Tugas Rutin Harian:</h3>
           {Array.from(new Set(myTasks.map(t => t["To do List"]))).map((taskTitle) => {
             const s = myTasks.find(t => t["To do List"] === taskTitle);
             const logTerkait = logs.find(l => 
@@ -411,11 +429,11 @@ export default function App() {
                   <p className="font-black text-slate-800 leading-tight flex-1 mr-4">{taskTitle}</p>
                   {logTerkait && <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{logTerkait.petugas === currentUser.nama ? logTerkait.approval : 'Selesai oleh ' + logTerkait.petugas}</span>}
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-4">{s["Jam/Rentang Jam"]}</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">{s["Jam/Rentang Jam"]}</p>
                 {(!logTerkait || logTerkait.approval === 'Tolak') ? (
                   <div className="relative">
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => handleTaskReport(e, taskTitle, s["Jam/Rentang Jam"])} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
-                    <div className={`p-4 rounded-xl text-center font-black text-[10px] uppercase border-2 border-dashed ${logTerkait?.approval === 'Tolak' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-slate-900 text-white'}`}>📷 AMBIL FOTO</div>
+                    <div className="p-4 bg-slate-900 text-white rounded-xl text-center font-black text-[10px] uppercase">📷 AMBIL FOTO</div>
                   </div>
                 ) : <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-center text-[10px] font-black text-slate-400 uppercase">LAPORAN DIKIRIM</div>}
               </div>
