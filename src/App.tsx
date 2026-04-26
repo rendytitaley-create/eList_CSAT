@@ -264,8 +264,8 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen bg-slate-900 font-sans p-6">
         <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-sm border-t-8 border-indigo-600">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-black text-slate-800 italic">E-MONITORING</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Authorized Access Only</p>
+            <h1 className="text-3xl font-black text-slate-800 italic">e-Lisabata</h1>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">BPS Kabupaten Seram Bagian Barat</p>
           </div>
           <div className="space-y-4">
             <input type="text" placeholder="Username" className="w-full p-4 rounded-2xl bg-slate-100 font-bold border-0 focus:ring-2 focus:ring-indigo-500" onChange={(e)=>setLoginData({...loginData, user: e.target.value})} onKeyDown={(e)=>e.key==='Enter'&&handleLogin()}/>
