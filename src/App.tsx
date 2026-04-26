@@ -441,8 +441,7 @@ export default function App() {
                 </div>
                 <p className="text-[10px] font-bold text-slate-400 mb-4">{s["Jam/Rentang Jam"]}</p>
                 
-                {/* Logika Akses: Jika belum ada laporan atau laporan hari ini ditolak, petugas bisa upload. 
-                    Jika laporan dari hari sebelumnya sudah ada, petugas hanya bisa lihat (Read-Only). */}
+                {/* Logika Akses: Tanpa titik koma di akhir blok */}
                 {(!logTerkait || (isHariIni && logTerkait.approval === 'Tolak')) ? (
                   <div className="relative group">
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => handleTaskReport(e, taskTitle, s["Jam/Rentang Jam"])} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
@@ -452,7 +451,9 @@ export default function App() {
                   <div className={`p-4 rounded-xl text-center text-[10px] font-black uppercase border-2 ${isHariIni ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-indigo-50 border-indigo-100 text-indigo-400'}`}>
                     {isHariIni ? "LAPORAN HARI INI TERKIRIM" : "RIWAYAT: PEKERJAAN SELESAI"}
                   </div>
-                );
+                )}
+              </div>
+            )
           })}
         </div>
       )}
