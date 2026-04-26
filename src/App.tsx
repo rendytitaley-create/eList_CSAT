@@ -425,7 +425,7 @@ export default function App() {
           {/* TUGAS TAMBAHAN */}
           <div className="bg-white p-6 rounded-[2rem] shadow-sm border-2 border-dashed border-indigo-200 mb-6">
             {!showManualTask ? (
-              <button onClick={()=>setShowManualTask(true)} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100">+ TAMBAH PEKERJAAN TAMBAHAN</button>
+              <button onClick={()=>setShowManualTask(true)} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100">+ PEKERJAAN TAMBAHAN</button>
             ) : (
               <div className="space-y-3">
                 <input type="text" placeholder="Uraian Tugas..." className="w-full p-4 bg-slate-50 rounded-xl font-bold border-0" value={manualTaskName} onChange={(e)=>setManualTaskName(e.target.value)} />
