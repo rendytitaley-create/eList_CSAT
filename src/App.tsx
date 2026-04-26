@@ -27,7 +27,7 @@ const getDirectImg = (url: string) => {
     let fileId = "";
     if (url.includes('id=')) { fileId = url.split('id=')[1].split('&')[0]; }
     else { const parts = url.split('/'); fileId = parts[parts.indexOf('d') + 1]; }
-    return `https://lh3.googleusercontent.com/d/)${fileId}`;
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
   }
   return url;
 };
@@ -120,16 +120,8 @@ export default function App() {
     setUploading(false);
   };
 
-  const handleDeleteUser = async (id: string) => {
-    if (confirm("Hapus user ini?")) await deleteDoc(doc(db, "users", id));
-  };
-
-  const handleVerify = async (id: string, status: 'Setuju' | 'Tolak') => {
-    await updateDoc(doc(db, "logs", id), { approval: status });
-  };
-
   const handleDeleteLog = async (id: string) => {
-    if (confirm("Hapus data laporan ini?")) await deleteDoc(doc(db, "logs", id));
+    if (confirm("Hapus data laporan uji coba ini?")) await deleteDoc(doc(db, "logs", id));
   };
 
   const handleUploadExcel = async (type: 'schedules' | 'shifts', e: any) => {
@@ -138,13 +130,18 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (evt: any) => {
       try {
-        const rawData = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
-        // Filter agar header atau baris kosong tidak masuk
-        const data = rawData.filter((r: any) => r["Nama Petugas"] || r["To do List"]);
+        const rawData: any[] = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
+        
+        // Pembersihan baris header agar tidak masuk database
+        const cleanedData = rawData.filter(row => {
+          const firstVal = String(Object.values(row)[0] || "").toLowerCase();
+          return firstVal && !firstVal.includes("nama petugas") && !firstVal.includes("uraian pekerjaan");
+        });
+
         if (confirm(`Ganti Master ${type}?`)) {
           const q = await getDocs(query(collection(db, type)));
           await Promise.all(q.docs.map(d => deleteDoc(d.ref)));
-          for (const r of data) await addDoc(collection(db, type), { ...r, createdAt: new Date().toISOString() });
+          for (const r of cleanedData) await addDoc(collection(db, type), { ...r, createdAt: new Date().toISOString() });
           alert("Master Berhasil Diganti!");
         }
       } catch (err) { alert("Gagal upload"); }
@@ -152,7 +149,6 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  // --- PERBAIKAN: JABATAN OTOMATIS TERSIMPAN ---
   const handleTaskReport = async (e: any, taskName: string, taskTime: string, isManual: boolean = false) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -161,7 +157,7 @@ export default function App() {
       const url = await uploadToDrive(file);
       await addDoc(collection(db, "logs"), {
         petugas: currentUser.nama,
-        jabatan: currentUser.jabatan, // Otomatis ambil dari user login
+        jabatan: currentUser.jabatan,
         task: isManual ? manualTaskName : taskName,
         jam: isManual ? "INSIDENTIL" : taskTime,
         fotoUrl: url,
@@ -176,7 +172,11 @@ export default function App() {
     finally { setUploading(false); }
   };
 
-  // --- PERBAIKAN: FILTER & EXCEL DENGAN GARIS ---
+  const handleVerify = async (id: string, status: 'Setuju' | 'Tolak') => {
+    await updateDoc(doc(db, "logs", id), { approval: status });
+  };
+
+  // --- POIN 2: EXCEL PROFESIONAL DENGAN GRID & WRAP ---
   const exportRekap = async (format: 'excel' | 'pdf') => {
     const filtered = logs.filter(l => {
       const d = l.timestamp.toDate();
@@ -184,31 +184,43 @@ export default function App() {
       const matchYear = d.getFullYear() === filterYear;
       const matchPetugas = filterPetugas === 'Semua' || l.petugas === filterPetugas;
       const matchJabatan = filterJabatan === 'Semua' || l.jabatan === filterJabatan;
-      return matchMonth && matchYear && matchPetugas && matchJabatan;
+      // Filter out data uji coba header
+      const isHeader = String(l.petugas).toLowerCase().includes("nama petugas");
+      return matchMonth && matchYear && matchPetugas && matchJabatan && !isHeader;
     });
 
-    if (filtered.length === 0) return alert("Data tidak ditemukan untuk periode/filter ini!");
+    if (filtered.length === 0) return alert("Data tidak ditemukan!");
 
     if (format === 'excel') {
-      // Menggunakan table HTML agar Excel memiliki GARIS dan WRAP TEXT otomatis
-      let tableHtml = `<table border="1">
-        <thead>
-          <tr style="background-color: #f2f2f2;">
-            <th>Tanggal</th><th>Petugas</th><th>Jabatan</th><th>Pekerjaan</th><th>Waktu</th><th>Status</th><th>Bukti</th>
-          </tr>
-        </thead>
-        <tbody>`;
-      
+      // Metode Blob HTML untuk memaksa Garis dan Wrap muncul di Excel
+      let tableHtml = `
+        <table border="1">
+          <thead>
+            <tr style="background-color: #f2f2f2; font-weight: bold;">
+              <th>Tanggal</th>
+              <th>Petugas</th>
+              <th>Jabatan</th>
+              <th style="width: 300px;">Pekerjaan</th>
+              <th>Jadwal SOP</th>
+              <th>Status (Verifikasi)</th>
+              <th>Bukti Foto</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
       filtered.forEach(l => {
-        tableHtml += `<tr>
-          <td>${l.waktu.split(',')[0]}</td>
-          <td>${l.petugas}</td>
-          <td>${l.jabatan || '-'}</td>
-          <td style="word-wrap: break-word;">${l.task}</td>
-          <td>${l.jam}</td>
-          <td>${l.approval}</td>
-          <td>${l.fotoUrl}</td>
-        </tr>`;
+        tableHtml += `
+          <tr>
+            <td>${l.waktu.split(',')[0]}</td>
+            <td>${l.petugas}</td>
+            <td>${l.jabatan}</td>
+            <td style="word-wrap: break-word; white-space: normal;">${l.task}</td>
+            <td>${l.jam}</td>
+            <td>${l.approval === 'Menunggu' ? 'BELUM DIPERIKSA' : l.approval}</td>
+            <td>${l.fotoUrl}</td>
+          </tr>
+        `;
       });
       tableHtml += `</tbody></table>`;
 
@@ -216,7 +228,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Rekap_${filterMonth}_${filterYear}.xls`;
+      a.download = `Rekap_Bulanan_${filterMonth}.xls`;
       a.click();
     } else {
         const script = document.createElement('script');
@@ -229,11 +241,15 @@ export default function App() {
           script2.onload = () => {
             const { jsPDF } = (window as any).jspdf;
             const doc = new jsPDF('l', 'mm', 'a4');
-            doc.text(`LAPORAN KERJA BULANAN - ${filterMonth}/${filterYear}`, 14, 15);
+            doc.text(`REKAPITULASI KERJA BULAN ${filterMonth}/${filterYear}`, 14, 15);
             (doc as any).autoTable({
                 startY: 20,
                 head: [['Tanggal', 'Petugas', 'Jabatan', 'Pekerjaan', 'Waktu', 'Status', 'Bukti']],
-                body: filtered.map(l => [l.waktu.split(',')[0], l.petugas, l.jabatan, l.task, l.jam, l.approval, l.fotoUrl]),
+                body: filtered.map(l => [
+                  l.waktu.split(',')[0], l.petugas, l.jabatan, l.task, l.jam, 
+                  l.approval === 'Menunggu' ? 'BELUM DIPERIKSA' : l.approval, l.fotoUrl
+                ]),
+                theme: 'grid',
                 styles: { fontSize: 7, overflow: 'linebreak' },
                 columnStyles: { 3: { cellWidth: 80 } }
             });
@@ -262,10 +278,7 @@ export default function App() {
   }
 
   const hariIni = getIndonesianDay();
-  const tglSekarang = new Date().toLocaleDateString('id-ID');
   const currentShifts = shifts.filter(s => String(s["Hari"]).toLowerCase() === hariIni.toLowerCase());
-  
-  // Menampilkan semua tugas yang sesuai jadwal, tanpa membatasi hanya untuk hari ini di daftar Monitoring
   const myTasks = schedules.filter(s => s["Nama Petugas"] === currentUser?.nama && checkDayMatch(s["Waktu"]));
 
   return (
@@ -277,12 +290,19 @@ export default function App() {
           </div>
           <div><h1 className="font-black text-lg leading-none">{currentUser.nama}</h1><p className="text-[10px] uppercase text-indigo-400 font-bold tracking-widest">{currentUser.jabatan}</p></div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <button onClick={()=>setIsLoggedIn(false)} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Logout</button>
-          <span className="text-[8px] font-bold text-slate-400 uppercase">{tglSekarang}</span>
-        </div>
+        <button onClick={()=>setIsLoggedIn(false)} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-lg">Logout</button>
       </header>
-      
+
+      {/* SHIFT PATEN SELALU MUNCUL */}
+      <div className="mb-6 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex items-center gap-3 overflow-x-auto">
+        <span className="text-[9px] font-black text-indigo-900 uppercase bg-indigo-200 px-2 py-1 rounded-lg shrink-0">Piket Hari Ini</span>
+        <div className="flex gap-2">
+          {currentShifts.map((s, i) => (
+            <span key={i} className="bg-white text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm whitespace-nowrap border border-indigo-50">{s["Nama Petugas"]} ({s["Shift"]})</span>
+          ))}
+        </div>
+      </div>
+
       {currentUser.role === 'admin' ? (
         <div className="space-y-6">
           <div className="flex gap-2 bg-slate-200 p-1 rounded-2xl shadow-inner overflow-x-auto">
@@ -314,7 +334,7 @@ export default function App() {
                 </select></div>
               </div>
               <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                <button onClick={()=>exportRekap('excel')} className="p-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase">Export Excel</button>
+                <button onClick={()=>exportRekap('excel')} className="p-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase">Export Excel (Garis+Wrap)</button>
                 <button onClick={()=>exportRekap('pdf')} className="p-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase">Export PDF</button>
               </div>
             </div>
@@ -349,7 +369,7 @@ export default function App() {
                         <td className="p-3 font-black text-indigo-900">{u.nama}</td>
                         <td className="p-3 uppercase font-bold text-slate-400">{u.jabatan}</td>
                         <td className="p-3 font-mono font-bold text-emerald-600">{u.password}</td>
-                        <td className="p-3 flex gap-2"><button onClick={()=>{setIsEditing(u.id); setNewUser(u);}} className="p-2 bg-white rounded-lg shadow-sm">✏️</button><button onClick={()=>handleDeleteUser(u.id)} className="p-2 bg-white rounded-lg shadow-sm text-red-500">🗑️</button></td>
+                        <td className="p-3 flex gap-2"><button onClick={()=>{setIsEditing(u.id); setNewUser(u);}} className="bg-white p-2 rounded shadow-sm">✏️</button><button onClick={()=>handleDeleteUser(u.id)} className="bg-white p-2 rounded shadow-sm text-red-500">🗑️</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -364,12 +384,13 @@ export default function App() {
                 <div key={log.id} className="p-5 bg-white rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col gap-2">
                    <div className="flex justify-between items-center">
                      <div className="flex items-center gap-2">
-                       <span className="text-[10px] font-black text-indigo-700 uppercase">{log.petugas} ({log.jabatan || 'SATPAM'})</span>
+                       <span className="text-[10px] font-black text-indigo-700 uppercase">{log.petugas} ({log.jabatan})</span>
                        {log.type === 'tambahan' && <span className="text-[8px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-black uppercase">Insidentil</span>}
                      </div>
                      <div className="flex items-center gap-2">
                         <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{log.approval}</span>
-                        <button onClick={() => handleDeleteLog(log.id)} className="text-red-400 hover:text-red-600">🗑️</button>
+                        {/* POIN 4: TOMBOL HAPUS LOG UNTUK CLEANING */}
+                        <button onClick={() => handleDeleteLog(log.id)} className="text-[14px] opacity-20 hover:opacity-100">🗑️</button>
                      </div>
                    </div>
                    <p className="text-xs font-bold text-slate-800">{log.task}</p>
@@ -389,11 +410,11 @@ export default function App() {
           {activeTab === 'master' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in">
               <div className="bg-white p-8 rounded-[2rem] border-2 border-dashed border-slate-200 text-center flex flex-col items-center">
-                 <p className="text-[10px] font-black text-slate-400 mb-4 uppercase italic">1. Upload List Tugas SOP</p>
+                 <p className="text-[10px] font-black text-slate-400 mb-4 uppercase italic">1. Upload List Tugas SOP (Excel)</p>
                  <input type="file" onChange={(e) => handleUploadExcel('schedules', e)} className="text-[10px] bg-slate-50 p-4 rounded-2xl w-full" />
               </div>
               <div className="bg-white p-8 rounded-[2rem] border-2 border-dashed border-indigo-200 text-center flex flex-col items-center">
-                 <p className="text-[10px] font-black text-indigo-400 mb-4 uppercase italic">2. Upload Jadwal Shift Paten</p>
+                 <p className="text-[10px] font-black text-indigo-400 mb-4 uppercase italic">2. Upload Jadwal Shift Paten (Excel)</p>
                  <input type="file" onChange={(e) => handleUploadExcel('shifts', e)} className="text-[10px] bg-indigo-50 p-4 rounded-2xl w-full border border-indigo-100" />
               </div>
             </div>
@@ -401,59 +422,48 @@ export default function App() {
         </div>
       ) : (
         <div className="space-y-4 animate-in fade-in">
-          <div className="bg-indigo-600 p-6 rounded-[2rem] text-white shadow-xl">
+          {/* TUGAS TAMBAHAN */}
+          <div className="bg-white p-6 rounded-[2rem] shadow-sm border-2 border-dashed border-indigo-200 mb-6">
             {!showManualTask ? (
-              <button onClick={()=>setShowManualTask(true)} className="w-full font-black text-xs uppercase flex items-center justify-center gap-2 tracking-widest">+ TAMBAH PEKERJAAN TAMBAHAN</button>
+              <button onClick={()=>setShowManualTask(true)} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100">+ TAMBAH PEKERJAAN TAMBAHAN</button>
             ) : (
               <div className="space-y-3">
-                <input type="text" placeholder="Uraian Tugas..." className="w-full p-4 bg-white/10 rounded-xl text-white font-bold border-0" value={manualTaskName} onChange={(e)=>setManualTaskName(e.target.value)} />
+                <input type="text" placeholder="Uraian Tugas..." className="w-full p-4 bg-slate-50 rounded-xl font-bold border-0" value={manualTaskName} onChange={(e)=>setManualTaskName(e.target.value)} />
                 <div className="relative">
                     <input type="file" accept="image/*" capture="environment" onChange={(e)=>handleTaskReport(e, '', '', true)} disabled={uploading||!manualTaskName} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
                     <div className="p-4 bg-white text-indigo-600 rounded-xl text-center font-black text-[10px] uppercase shadow-lg">📷 AMBIL FOTO & KIRIM</div>
                 </div>
-                <button onClick={()=>setShowManualTask(false)} className="w-full text-center text-[9px] font-bold opacity-70">BATAL</button>
+                <button onClick={()=>setShowManualTask(false)} className="w-full text-center text-[9px] font-bold opacity-30">BATAL</button>
               </div>
             )}
           </div>
 
-          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest">Daftar Tugas & Riwayat:</h3>
+          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest italic">Tugas Rutin Harian:</h3>
           {Array.from(new Set(myTasks.map(t => t["To do List"]))).map((taskTitle) => {
             const s = myTasks.find(t => t["To do List"] === taskTitle);
             
-            // Mencari laporan terakhir (termasuk hari-hari sebelumnya)
-            const logTerkait = logs.find(l => l.task === taskTitle && l.jabatan === currentUser.jabatan);
-            
-            // Cek apakah laporan tersebut dibuat hari ini
-            const isHariIni = logTerkait?.waktu.split(',')[0] === tglSekarang;
+            // POIN 4: ANTI-DOUBLE BERDASARKAN JABATAN & HARI INI
+            const logTerkait = logs.find(l => 
+              l.task === taskTitle && 
+              l.jabatan === currentUser.jabatan && 
+              l.waktu.split(',')[0] === new Date().toLocaleDateString('id-ID')
+            );
 
             return (
               <div key={taskTitle} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                 <div className="flex justify-between items-start mb-2">
                   <p className="font-black text-slate-800 leading-tight flex-1 mr-4">{taskTitle}</p>
-                  {logTerkait && (
-                    <div className="flex flex-col items-end gap-1">
-                      <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>
-                        {logTerkait.petugas === currentUser.nama ? logTerkait.approval : 'Oleh ' + logTerkait.petugas}
-                      </span>
-                      <span className="text-[7px] font-bold text-slate-400">{logTerkait.waktu.split(',')[0]}</span>
-                    </div>
-                  )}
+                  {logTerkait && <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{logTerkait.petugas === currentUser.nama ? logTerkait.approval : 'Selesai oleh ' + logTerkait.petugas}</span>}
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 mb-4">{s["Jam/Rentang Jam"]}</p>
-                
-                {/* Logika Akses: Tanpa titik koma di akhir blok */}
-                {(!logTerkait || (isHariIni && logTerkait.approval === 'Tolak')) ? (
+                <p className="text-[10px] font-bold text-slate-400 mb-4 uppercase">{s["Jam/Rentang Jam"]}</p>
+                {(!logTerkait || logTerkait.approval === 'Tolak') ? (
                   <div className="relative group">
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => handleTaskReport(e, taskTitle, s["Jam/Rentang Jam"])} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
                     <div className="p-4 bg-slate-900 text-white rounded-xl text-center font-black text-[10px] uppercase active:scale-95 transition-all">📷 AMBIL FOTO LAPORAN</div>
                   </div>
-                ) : (
-                  <div className={`p-4 rounded-xl text-center text-[10px] font-black uppercase border-2 ${isHariIni ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-indigo-50 border-indigo-100 text-indigo-400'}`}>
-                    {isHariIni ? "LAPORAN HARI INI TERKIRIM" : "RIWAYAT: PEKERJAAN SELESAI"}
-                  </div>
-                )}
+                ) : <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-center text-[10px] font-black text-slate-400 uppercase">TUGAS SELESAI</div>}
               </div>
-            )
+            );
           })}
         </div>
       )}
