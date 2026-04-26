@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, deleteDoc, updateDoc, doc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDocs, deleteDoc, updateDoc, doc, where } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
-// === 1. KONFIGURASI ===
+// === 1. KONFIGURASI (SESUAIKAN DENGAN DATA ANDA) ===
 const firebaseConfig = {
   apiKey: "AIzaSyBxdRzIlg5YhocDDCK15pD2WwhJ9P2McF4",
   authDomain: "elist-csat.firebaseapp.com",
@@ -20,221 +20,198 @@ const db = getFirestore(app);
 const getIndonesianDay = () => new Intl.DateTimeFormat('id-ID', { weekday: 'long' }).format(new Date());
 const getWeekOfMonth = () => Math.ceil(new Date().getDate() / 7);
 
-const checkDayMatch = (waktuExcel: string) => {
-  const hariIni = getIndonesianDay().toLowerCase();
-  const mingguKeIni = getWeekOfMonth();
-  const target = waktuExcel.toLowerCase();
-  if (target.includes("setiap hari")) return true;
-  if (target.includes("-")) {
-    const hariList = ["senin", "selasa", "rabu", "kamis", "jumat", "sabtu", "minggu"];
-    const [start, end] = target.split("-").map(h => h.trim());
-    const startIndex = hariList.indexOf(start);
-    const endIndex = hariList.indexOf(end);
-    const currentIndex = hariList.indexOf(hariIni);
-    if (currentIndex >= startIndex && currentIndex <= endIndex) return true;
-  }
-  if (target.includes("minggu ke-")) {
-    const targetMinggu = parseInt(target.split("minggu ke-")[1]);
-    if (target.includes(hariIni) && mingguKeIni === targetMinggu) return true;
-  }
-  if (target === hariIni) return true;
-  return false;
-};
-
 export default function App() {
-  const [role, setRole] = useState<'admin' | 'petugas' | null>(null);
-  const [activePetugas, setActivePetugas] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [loginData, setLoginData] = useState({ user: '', pass: '' });
+  
+  const [activeTab, setActiveTab] = useState<'monitoring' | 'users' | 'schedules'>('monitoring');
   const [uploading, setUploading] = useState(false);
+  
   const [schedules, setSchedules] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+
+  // Data untuk User Baru
+  const [newUser, setNewUser] = useState({ nama: '', username: '', password: '', jabatan: 'SATPAM', foto: '' });
 
   useEffect(() => {
-    const unsubSchedules = onSnapshot(query(collection(db, "schedules")), (snap) => {
-      setSchedules(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    const unsubShifts = onSnapshot(query(collection(db, "shifts")), (snap) => {
-      setShifts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    const unsubLogs = onSnapshot(query(collection(db, "logs"), orderBy("timestamp", "desc")), (snap) => {
-      setLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => { unsubSchedules(); unsubShifts(); unsubLogs(); };
+    onSnapshot(query(collection(db, "schedules")), (snap) => setSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    onSnapshot(query(collection(db, "shifts")), (snap) => setShifts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    onSnapshot(query(collection(db, "logs"), orderBy("timestamp", "desc")), (snap) => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    onSnapshot(query(collection(db, "users")), (snap) => setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, []);
 
-  const handleUploadGeneric = async (collectionName: string, e: any) => {
+  // --- FUNGSI LOGIN ---
+  const handleLogin = () => {
+    const foundUser = allUsers.find(u => u.username === loginData.user && u.password === loginData.pass);
+    if (foundUser) {
+      setCurrentUser(foundUser);
+      setIsLoggedIn(true);
+    } else {
+      alert("Username atau Password Salah!");
+    }
+  };
+
+  // --- FUNGSI DRIVE UPLOAD (UNTUK FOTO PROFIL & LAPORAN) ---
+  const uploadFileToDrive = async (file: File) => {
+    const reader = new FileReader();
+    return new Promise((resolve, reject) => {
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        try {
+          const res = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ base64, type: file.type, name: `${Date.now()}_${file.name}` })
+          });
+          const result = await res.json();
+          resolve(result.url);
+        } catch (err) { reject(err); }
+      };
+    });
+  };
+
+  // --- DAFTAR USER BARU ---
+  const handleCreateUser = async (e: any) => {
+    e.preventDefault();
+    setUploading(true);
+    try {
+      await addDoc(collection(db, "users"), { ...newUser, role: newUser.jabatan === 'PENGAWAS' ? 'admin' : 'petugas' });
+      alert("User Berhasil Didaftarkan!");
+      setNewUser({ nama: '', username: '', password: '', jabatan: 'SATPAM', foto: '' });
+    } catch (err) { alert("Gagal Daftar"); }
+    setUploading(false);
+  };
+
+  const handleTaskUpload = async (e: any, task: any) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (evt: any) => {
-      try {
-        const data = XLSX.utils.sheet_to_json(XLSX.read(evt.target.result, { type: 'binary' }).Sheets[XLSX.read(evt.target.result, { type: 'binary' }).SheetNames[0]]);
-        if (confirm(`Perbarui data ${collectionName}?`)) {
-          const qSnapshot = await getDocs(query(collection(db, collectionName)));
-          await Promise.all(qSnapshot.docs.map((doc) => deleteDoc(doc.ref)));
-          for (const row of data) {
-            await addDoc(collection(db, collectionName), { ...row, createdAt: new Date().toISOString() });
-          }
-          alert("Data Berhasil Diperbarui!");
-        }
-      } catch (error) { alert("Gagal upload"); }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  const handleFileUpload = async (e: any, taskInfo: any) => {
-    const file = e.target.files[0];
-    if (!file || !activePetugas) return alert("Isi Nama Petugas!");
     setUploading(true);
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      try {
-        const res = await fetch(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          body: JSON.stringify({ base64, type: file.type, name: `${activePetugas}_${Date.now()}.jpg` })
-        });
-        const result = await res.json();
-        if (result.result === 'success') {
-          await addDoc(collection(db, "logs"), {
-            petugas: activePetugas,
-            task: taskInfo["To do List"],
-            jam: taskInfo["Jam/Rentang Jam"],
-            fotoUrl: result.url,
-            approval: 'Menunggu',
-            waktu: new Date().toLocaleString('id-ID'),
-            timestamp: new Date()
-          });
-          alert("Laporan Terkirim!");
-        }
-      } catch (err) { alert("Gagal Kirim"); }
-      finally { setUploading(false); }
-    };
+    try {
+      const url = await uploadFileToDrive(file);
+      await addDoc(collection(db, "logs"), {
+        petugas: currentUser.nama,
+        task: task["To do List"],
+        jam: task["Jam/Rentang Jam"],
+        fotoUrl: url,
+        approval: 'Menunggu',
+        waktu: new Date().toLocaleString('id-ID'),
+        timestamp: new Date()
+      });
+      alert("Laporan Terkirim!");
+    } catch (err) { alert("Gagal Kirim"); }
+    setUploading(false);
   };
 
-  const handleVerify = async (id: string, status: 'Setuju' | 'Tolak') => {
-    await updateDoc(doc(db, "logs", id), { approval: status });
-  };
+  // --- TAMPILAN LOGIN ---
+  if (!isLoggedIn) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-indigo-900 p-6">
+        <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm">
+          <h1 className="text-2xl font-black text-center text-indigo-900 mb-6">LOGIN OPS</h1>
+          <input type="text" placeholder="Username" className="w-full p-4 mb-3 border rounded-2xl font-bold" onChange={(e)=>setLoginData({...loginData, user: e.target.value})} />
+          <input type="password" placeholder="Password" className="w-full p-4 mb-6 border rounded-2xl font-bold" onChange={(e)=>setLoginData({...loginData, pass: e.target.value})} />
+          <button onClick={handleLogin} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg">MASUK</button>
+          <p className="text-[10px] text-center mt-4 text-slate-400 font-bold uppercase">v1.0 - Authorized Personnel Only</p>
+        </div>
+      </div>
+    );
+  }
 
   const hariIni = getIndonesianDay();
   const currentShifts = shifts.filter(s => String(s["Hari"]).toLowerCase() === hariIni.toLowerCase());
-  const displaySchedules = schedules.filter(s => {
-    const matchUser = activePetugas ? s["Nama Petugas"].toLowerCase().includes(activePetugas.toLowerCase()) : false;
-    const matchTime = checkDayMatch(s["Waktu"] || "");
-    return matchUser && matchTime;
-  });
+  const myTasks = schedules.filter(s => s["Nama Petugas"] === currentUser.nama);
 
   return (
-    <div className="p-4 font-sans max-w-4xl mx-auto bg-slate-50 min-h-screen text-slate-800">
-      {/* HEADER & SHIFT */}
-      <header className="mb-6 bg-indigo-900 text-white p-6 rounded-3xl shadow-lg text-center">
-        <h1 className="text-2xl font-black italic uppercase">E-Monitoring Ops</h1>
-        <p className="text-[10px] opacity-70 tracking-widest mt-1 mb-4 border-b border-indigo-800 pb-2">
-          {hariIni}, {new Date().toLocaleDateString('id-ID')} | Minggu ke-{getWeekOfMonth()}
-        </p>
-        <div className="bg-indigo-800/50 p-3 rounded-2xl">
-          <p className="text-[10px] font-bold text-indigo-300 mb-2 uppercase">Shift Hari Ini (Paten)</p>
-          <div className="flex flex-wrap justify-center gap-2">
-            {currentShifts.map((s, i) => (
-              <div key={i} className="bg-white text-indigo-900 px-3 py-1 rounded-full text-xs font-bold">
-                {s["Nama Petugas"]} <span className="text-[9px] opacity-60">({s["Shift"]})</span>
-              </div>
-            ))}
+    <div className="p-4 font-sans max-w-4xl mx-auto bg-slate-50 min-h-screen">
+      <header className="mb-6 bg-indigo-900 text-white p-6 rounded-3xl shadow-lg flex justify-between items-center">
+        <div className="text-left">
+          <h1 className="text-xl font-black italic">E-MONITORING</h1>
+          <p className="text-[10px] opacity-60 font-bold uppercase tracking-widest">{hariIni}, {new Date().toLocaleDateString('id-ID')}</p>
+        </div>
+        <div className="text-right flex items-center gap-3">
+          <div className="hidden sm:block">
+            <p className="text-xs font-black">{currentUser.nama}</p>
+            <p className="text-[9px] font-bold text-indigo-300 uppercase">{currentUser.jabatan}</p>
           </div>
+          <button onClick={() => setIsLoggedIn(false)} className="bg-red-500 text-[9px] font-bold px-3 py-2 rounded-xl uppercase">Logout</button>
         </div>
       </header>
 
-      {!role ? (
-        <div className="flex flex-col gap-6 mt-10">
-          <button onClick={() => setRole('petugas')} className="p-6 bg-emerald-600 text-white rounded-2xl shadow-md font-bold text-lg">LOG KERJA PETUGAS</button>
-          <button onClick={() => setRole('admin')} className="p-6 bg-white border-2 border-indigo-600 text-indigo-700 rounded-2xl shadow-md font-bold text-lg">MENU ADMIN / PENGAWAS</button>
-        </div>
-      ) : (
-        <div className="animate-in fade-in">
-          <button onClick={() => setRole(null)} className="mb-6 font-bold text-slate-400 text-xs">← KEMBALI</button>
+      {currentUser.role === 'admin' ? (
+        <div className="space-y-6">
+          {/* TAB NAVIGATION */}
+          <div className="flex gap-2 bg-slate-200 p-1 rounded-2xl">
+            {['monitoring', 'users', 'schedules'].map((t) => (
+              <button key={t} onClick={() => setActiveTab(t as any)} className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === t ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
 
-          {role === 'admin' ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white p-4 rounded-xl border border-slate-200">
-                  <h3 className="text-[10px] font-bold mb-2">UPLOAD TUGAS</h3>
-                  <input type="file" onChange={(e) => handleUploadGeneric('schedules', e)} className="text-[10px]" />
+          {activeTab === 'users' && (
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in fade-in">
+              <h2 className="font-black text-indigo-900 mb-4 uppercase text-sm">Daftarkan Petugas Baru</h2>
+              <form onSubmit={handleCreateUser} className="space-y-3">
+                <input type="text" placeholder="Nama Lengkap" required className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold" value={newUser.nama} onChange={(e)=>setNewUser({...newUser, nama: e.target.value})} />
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" placeholder="Username" required className="p-3 bg-slate-50 rounded-xl text-sm font-bold" value={newUser.username} onChange={(e)=>setNewUser({...newUser, username: e.target.value})} />
+                  <input type="password" placeholder="Password" required className="p-3 bg-slate-50 rounded-xl text-sm font-bold" value={newUser.password} onChange={(e)=>setNewUser({...newUser, password: e.target.value})} />
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-indigo-200">
-                  <h3 className="text-[10px] font-bold mb-2">UPLOAD SHIFT PATEN</h3>
-                  <input type="file" onChange={(e) => handleUploadGeneric('shifts', e)} className="text-[10px]" />
-                </div>
-              </div>
-
-              {/* DASHBOARD MONITORING DENGAN VERIFIKASI */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h2 className="font-bold text-sm tracking-widest uppercase mb-4 text-indigo-900">Dashboard Verifikasi</h2>
-                <div className="space-y-4">
-                  {logs.map(log => (
-                    <div key={log.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-xs font-black text-indigo-700 uppercase">{log.petugas}</p>
-                          <p className="text-[9px] text-slate-400">{log.waktu}</p>
-                        </div>
-                        <span className={`text-[9px] px-2 py-1 rounded-full font-bold uppercase ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : log.approval === 'Tolak' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {log.approval}
-                        </span>
-                      </div>
-                      <p className="text-xs font-bold">{log.task} ({log.jam})</p>
-                      <div className="flex gap-2">
-                        <a href={log.fotoUrl} target="_blank" className="flex-1 text-center bg-white border border-indigo-200 text-indigo-700 py-2 rounded-lg text-[10px] font-bold no-underline">LIHAT FOTO</a>
-                        {log.approval === 'Menunggu' && (
-                          <>
-                            <button onClick={() => handleVerify(log.id, 'Setuju')} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-[10px] font-bold uppercase">Setuju</button>
-                            <button onClick={() => handleVerify(log.id, 'Tolak')} className="flex-1 bg-red-600 text-white py-2 rounded-lg text-[10px] font-bold uppercase">Tolak</button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <input type="text" value={activePetugas} onChange={(e)=>setActivePetugas(e.target.value)} placeholder="Nama Anda..." className="w-full p-4 bg-white border-0 rounded-2xl shadow-sm font-bold" />
-              
-              <h2 className="font-bold text-slate-500 text-xs uppercase px-2 tracking-widest">Tugas & Status Laporan:</h2>
-              {displaySchedules.map((s, i) => {
-                // Mencari apakah tugas ini sudah ada log-nya untuk petugas ini hari ini
-                const logTerkait = logs.find(l => l.petugas === activePetugas && l.task === s["To do List"]);
-                
-                return (
-                  <div key={i} className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-emerald-500">
-                    <div className="flex justify-between items-start mb-2">
-                      <p className="font-black text-lg flex-1">{s["To do List"]}</p>
-                      {logTerkait && (
-                        <span className={`text-[9px] px-2 py-1 rounded-full font-bold uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : logTerkait.approval === 'Tolak' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {logTerkait.approval}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">{s["Jam/Rentang Jam"]}</p>
-                    
-                    {(!logTerkait || logTerkait.approval === 'Tolak') ? (
-                      <div className="relative">
-                        <input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileUpload(e, s)} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
-                        <div className="p-3 border-2 border-dashed border-emerald-200 rounded-xl flex items-center justify-center gap-2 bg-emerald-50">
-                          <span className="text-sm font-bold text-emerald-700 uppercase">{uploading ? "Mengirim..." : (logTerkait?.approval === 'Tolak' ? "Upload Ulang" : "Ambil Foto Bukti")}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-3 bg-slate-100 rounded-xl text-center">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Laporan Terkirim</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                <select className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold" value={newUser.jabatan} onChange={(e)=>setNewUser({...newUser, jabatan: e.target.value})}>
+                  <option value="SATPAM">SATPAM</option>
+                  <option value="CS">CLEANING SERVICE</option>
+                  <option value="PENGAWAS">PENGAWAS (ADMIN)</option>
+                </select>
+                <button type="submit" disabled={uploading} className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-md">{uploading ? 'PROSES...' : 'SIMPAN USER'}</button>
+              </form>
             </div>
           )}
+
+          {activeTab === 'monitoring' && (
+             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+             <h2 className="font-black text-indigo-900 mb-4 uppercase text-sm tracking-widest">Live Log Pekerjaan</h2>
+             <div className="space-y-3">
+               {logs.map(log => (
+                 <div key={log.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col gap-2">
+                   <div className="flex justify-between items-center">
+                     <span className="text-[10px] font-black text-indigo-600 uppercase">{log.petugas} - {log.jam}</span>
+                     <span className={`text-[9px] px-2 py-1 rounded-full font-bold ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{log.approval}</span>
+                   </div>
+                   <p className="text-xs font-bold text-slate-800">{log.task}</p>
+                   <a href={log.fotoUrl} target="_blank" className="text-[9px] bg-white border p-2 rounded-lg text-center font-bold text-indigo-600">LIHAT BUKTI FOTO</a>
+                 </div>
+               ))}
+             </div>
+           </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-emerald-500">
+            <h2 className="text-xs font-black text-slate-400 uppercase mb-2">Tugas Anda:</h2>
+            <p className="text-xl font-black text-indigo-900 leading-tight">Halo, {currentUser.nama}</p>
+            <p className="text-[10px] font-bold text-emerald-600">Anda Login sebagai {currentUser.jabatan}</p>
+          </div>
+
+          <div className="space-y-4">
+            {myTasks.length > 0 ? myTasks.map((s, i) => (
+              <div key={i} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+                <p className="font-black text-slate-800 leading-none mb-1">{s["To do List"]}</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">{s["Jam/Rentang Jam"]}</p>
+                <div className="relative group">
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => handleTaskUpload(e, s)} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
+                  <div className="p-4 bg-emerald-50 border-2 border-dashed border-emerald-200 rounded-2xl text-center font-black text-[10px] text-emerald-700 uppercase">
+                    {uploading ? 'MENGIRIM...' : 'AMBIL FOTO LAPORAN'}
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <p className="text-center py-10 text-slate-400 italic text-xs uppercase font-bold">Tidak ada jadwal tugas untuk Anda hari ini.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
