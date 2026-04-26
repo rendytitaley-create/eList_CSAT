@@ -452,7 +452,10 @@ export default function App() {
                   <div className={`p-4 rounded-xl text-center text-[10px] font-black uppercase border-2 ${isHariIni ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-indigo-50 border-indigo-100 text-indigo-400'}`}>
                     {isHariIni ? "LAPORAN HARI INI TERKIRIM" : "RIWAYAT: PEKERJAAN SELESAI"}
                   </div>
-                )}
-              </div>
-            );
+                );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
