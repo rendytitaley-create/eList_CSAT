@@ -27,7 +27,7 @@ const getDirectImg = (url: string) => {
     let fileId = "";
     if (url.includes('id=')) { fileId = url.split('id=')[1].split('&')[0]; }
     else { const parts = url.split('/'); fileId = parts[parts.indexOf('d') + 1]; }
-    return `https://lh3.googleusercontent.com/d/${fileId}`;
+    return `https://lh3.googleusercontent.com/d/)${fileId}`;
   }
   return url;
 };
@@ -262,7 +262,10 @@ export default function App() {
   }
 
   const hariIni = getIndonesianDay();
+  const tglSekarang = new Date().toLocaleDateString('id-ID');
   const currentShifts = shifts.filter(s => String(s["Hari"]).toLowerCase() === hariIni.toLowerCase());
+  
+  // Menampilkan semua tugas yang sesuai jadwal, tanpa membatasi hanya untuk hari ini di daftar Monitoring
   const myTasks = schedules.filter(s => s["Nama Petugas"] === currentUser?.nama && checkDayMatch(s["Waktu"]));
 
   return (
@@ -274,18 +277,12 @@ export default function App() {
           </div>
           <div><h1 className="font-black text-lg leading-none">{currentUser.nama}</h1><p className="text-[10px] uppercase text-indigo-400 font-bold tracking-widest">{currentUser.jabatan}</p></div>
         </div>
-        <button onClick={()=>setIsLoggedIn(false)} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Logout</button>
-      </header>
-
-      <div className="mb-6 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex items-center gap-3 overflow-x-auto">
-        <span className="text-[9px] font-black text-indigo-900 uppercase bg-indigo-200 px-2 py-1 rounded-lg shrink-0">Piket Hari Ini</span>
-        <div className="flex gap-2">
-          {currentShifts.map((s, i) => (
-            <span key={i} className="bg-white text-indigo-700 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm whitespace-nowrap border border-indigo-50">{s["Nama Petugas"]} ({s["Shift"]})</span>
-          ))}
+        <div className="flex flex-col items-end gap-1">
+          <button onClick={()=>setIsLoggedIn(false)} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Logout</button>
+          <span className="text-[8px] font-bold text-slate-400 uppercase">{tglSekarang}</span>
         </div>
-      </div>
-
+      </header>
+      
       {currentUser.role === 'admin' ? (
         <div className="space-y-6">
           <div className="flex gap-2 bg-slate-200 p-1 rounded-2xl shadow-inner overflow-x-auto">
@@ -419,28 +416,43 @@ export default function App() {
             )}
           </div>
 
-          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest">Tugas Rutin Harian:</h3>
+          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-4 tracking-widest">Daftar Tugas & Riwayat:</h3>
           {Array.from(new Set(myTasks.map(t => t["To do List"]))).map((taskTitle) => {
             const s = myTasks.find(t => t["To do List"] === taskTitle);
-            const logTerkait = logs.find(l => l.task === taskTitle && l.jabatan === currentUser.jabatan && l.waktu.split(',')[0] === new Date().toLocaleDateString('id-ID'));
+            
+            // Mencari laporan terakhir (termasuk hari-hari sebelumnya)
+            const logTerkait = logs.find(l => l.task === taskTitle && l.jabatan === currentUser.jabatan);
+            
+            // Cek apakah laporan tersebut dibuat hari ini
+            const isHariIni = logTerkait?.waktu.split(',')[0] === tglSekarang;
+
             return (
               <div key={taskTitle} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
                 <div className="flex justify-between items-start mb-2">
                   <p className="font-black text-slate-800 leading-tight flex-1 mr-4">{taskTitle}</p>
-                  {logTerkait && <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{logTerkait.petugas === currentUser.nama ? logTerkait.approval : 'Selesai oleh ' + logTerkait.petugas}</span>}
+                  {logTerkait && (
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${logTerkait.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>
+                        {logTerkait.petugas === currentUser.nama ? logTerkait.approval : 'Oleh ' + logTerkait.petugas}
+                      </span>
+                      <span className="text-[7px] font-bold text-slate-400">{logTerkait.waktu.split(',')[0]}</span>
+                    </div>
+                  )}
                 </div>
                 <p className="text-[10px] font-bold text-slate-400 mb-4">{s["Jam/Rentang Jam"]}</p>
-                {(!logTerkait || logTerkait.approval === 'Tolak') ? (
+                
+                {/* Logika Akses: Jika belum ada laporan atau laporan hari ini ditolak, petugas bisa upload. 
+                    Jika laporan dari hari sebelumnya sudah ada, petugas hanya bisa lihat (Read-Only). */}
+                {(!logTerkait || (isHariIni && logTerkait.approval === 'Tolak')) ? (
                   <div className="relative group">
                     <input type="file" accept="image/*" capture="environment" onChange={(e) => handleTaskReport(e, taskTitle, s["Jam/Rentang Jam"])} disabled={uploading} className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer" />
                     <div className="p-4 bg-slate-900 text-white rounded-xl text-center font-black text-[10px] uppercase active:scale-95 transition-all">📷 AMBIL FOTO LAPORAN</div>
                   </div>
-                ) : <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-center text-[10px] font-black text-slate-400 uppercase">LAPORAN DIKIRIM</div>}
+                ) : (
+                  <div className={`p-4 rounded-xl text-center text-[10px] font-black uppercase border-2 ${isHariIni ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-indigo-50 border-indigo-100 text-indigo-400'}`}>
+                    {isHariIni ? "LAPORAN HARI INI TERKIRIM" : "RIWAYAT: PEKERJAAN SELESAI"}
+                  </div>
+                )}
               </div>
             );
           })}
-        </div>
-      )}
-    </div>
-  );
-}
