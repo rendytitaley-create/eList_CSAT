@@ -177,18 +177,30 @@ export default function App() {
     await updateDoc(doc(db, "logs", id), { approval: status });
   };
 
-  // --- POIN 2: EXCEL PROFESIONAL DENGAN GRID & WRAP ---
   const exportRekap = async (format: 'excel' | 'pdf') => {
     const filtered = logs.filter(l => {
+      // 1. Ambil data waktu dari timestamp
       const d = l.timestamp.toDate();
       const matchMonth = (d.getMonth() + 1) === filterMonth;
       const matchYear = d.getFullYear() === filterYear;
-      const matchPetugas = filterPetugas === 'Semua' || l.petugas === filterPetugas;
-      const matchJabatan = filterJabatan === 'Semua' || l.jabatan === filterJabatan;
-      // Filter out data uji coba header
-      const isHeader = String(l.petugas).toLowerCase().includes("nama petugas");
+
+      // 2. Perbaikan Filter Petugas (dibuat huruf kecil semua & hapus spasi agar akurat)
+      const petugasDb = String(l.petugas || "").toLowerCase().trim();
+      const petugasFilter = String(filterPetugas).toLowerCase().trim();
+      const matchPetugas = filterPetugas === 'Semua' || petugasDb === petugasFilter;
+
+      // 3. Perbaikan Filter Jabatan
+      const jabatanDb = String(l.jabatan || "").toLowerCase().trim();
+      const jabatanFilter = String(filterJabatan).toLowerCase().trim();
+      const matchJabatan = filterJabatan === 'Semua' || jabatanDb === jabatanFilter;
+
+      // 4. Pastikan bukan data uji coba/header
+      const isHeader = petugasDb.includes("nama petugas");
+
       return matchMonth && matchYear && matchPetugas && matchJabatan && !isHeader;
     });
+
+    if (filtered.length === 0) return alert("Data tidak ditemukan! Pastikan bulan, tahun, dan nama petugas sudah sesuai.");
 
     if (filtered.length === 0) return alert("Data tidak ditemukan!");
 
