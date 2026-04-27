@@ -124,6 +124,16 @@ export default function App() {
   const handleDeleteLog = async (id: string) => {
     if (confirm("Hapus data laporan uji coba ini?")) await deleteDoc(doc(db, "logs", id));
   };
+  const handleDeleteUser = async (id: string) => {
+    if (confirm("Apakah Anda yakin ingin menghapus petugas ini? Data login mereka akan hilang secara permanen.")) {
+      try {
+        await deleteDoc(doc(db, "users", id));
+        alert("Petugas berhasil dihapus!");
+      } catch (err) {
+        alert("Gagal menghapus petugas");
+      }
+    }
+  };
 
   const handleUploadExcel = async (type: 'schedules' | 'shifts', e: any) => {
     const file = e.target.files?.[0];
