@@ -165,6 +165,8 @@ export default function App() {
         approval: 'Menunggu',
         type: isManual ? 'tambahan' : 'rutin',
         waktu: new Date().toLocaleString('id-ID'),
+        // Tambahan: Catatan waktu server untuk verifikasi admin
+        verifiedTime: new Date().toISOString(), 
         timestamp: new Date()
       });
       alert("Laporan Terkirim!");
@@ -292,8 +294,19 @@ export default function App() {
 
   const hariIni = getIndonesianDay();
   const currentShifts = shifts.filter(s => String(s["Hari"]).toLowerCase() === hariIni.toLowerCase());
-  const myTasks = schedules.filter(s => s["Nama Petugas"] === currentUser?.nama && checkDayMatch(s["Waktu"]));
+  const myTasksRaw = schedules.filter(s => s["Nama Petugas"] === currentUser?.nama && checkDayMatch(s["Waktu"]));
+  
+  // Logika supaya yang belum selesai naik ke atas
+  const myTasks = [...myTasksRaw].sort((a, b) => {
+    const selesaiA = logs.some(l => l.task === a["To do List"] && l.jabatan === currentUser.jabatan && l.waktu.split(',')[0] === new Date().toLocaleDateString('id-ID'));
+    const selesaiB = logs.some(l => l.task === b["To do List"] && l.jabatan === currentUser.jabatan && l.waktu.split(',')[0] === new Date().toLocaleDateString('id-ID'));
+    return (selesaiA === selesaiB) ? 0 : selesaiA ? 1 : -1;
+  });
 
+  // Hitung statistik untuk Dashboard
+  const totalTugas = myTasks.length;
+  const tugasSelesai = myTasks.filter(t => logs.some(l => l.task === t["To do List"] && l.jabatan === currentUser.jabatan && l.waktu.split(',')[0] === new Date().toLocaleDateString('id-ID'))).length;
+  const sisaTugas = totalTugas - tugasSelesai;
   return (
     <div className="p-4 font-sans max-w-5xl mx-auto bg-slate-50 min-h-screen">
       <header className="mb-6 bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl flex justify-between items-center border-b-4 border-indigo-600">
@@ -468,6 +481,21 @@ export default function App() {
         </div>
       ) : (
         <div className="space-y-4 animate-in fade-in">
+          {/* DASHBOARD RINGKASAN PETUGAS (BARU) */}
+          <div className="grid grid-cols-3 gap-3 mb-2">
+            <div className="bg-white p-4 rounded-2xl shadow-sm border-b-4 border-indigo-500 text-center">
+              <p className="text-[8px] font-black text-slate-400 uppercase">Total Tugas</p>
+              <p className="text-xl font-black text-slate-800">{totalTugas}</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl shadow-sm border-b-4 border-emerald-500 text-center">
+              <p className="text-[8px] font-black text-slate-400 uppercase">Selesai</p>
+              <p className="text-xl font-black text-emerald-600">{tugasSelesai}</p>
+            </div>
+            <div className="bg-white p-4 rounded-2xl shadow-sm border-b-4 border-orange-500 text-center">
+              <p className="text-[8px] font-black text-slate-400 uppercase">Sisa</p>
+              <p className="text-xl font-black text-orange-600">{sisaTugas}</p>
+            </div>
+          </div>
           {/* TUGAS TAMBAHAN */}
           <div className="bg-white p-6 rounded-[2rem] shadow-sm border-2 border-dashed border-indigo-200 mb-6">
             {!showManualTask ? (
