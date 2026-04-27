@@ -75,6 +75,7 @@ export default function App() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterPetugas, setFilterPetugas] = useState('Semua');
   const [filterJabatan, setFilterJabatan] = useState('Semua');
+  const [filterDateMonitoring, setFilterDateMonitoring] = useState('');
 
   useEffect(() => {
     onSnapshot(query(collection(db, "schedules")), (snap) => setSchedules(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -378,9 +379,43 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'monitoring' && (
+         {activeTab === 'monitoring' && (
             <div className="space-y-4 animate-in fade-in">
-              {logs.map(log => (
+              {/* --- BOX FILTER TANGGAL (BARU) --- */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[9px] font-black text-indigo-900 uppercase tracking-widest">Filter Riwayat Tanggal</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="date" 
+                      className="flex-1 p-3 bg-slate-50 rounded-xl font-bold text-xs border-0 focus:ring-2 focus:ring-indigo-500"
+                      value={filterDateMonitoring}
+                      onChange={(e) => setFilterDateMonitoring(e.target.value)}
+                    />
+                    {filterDateMonitoring && (
+                      <button 
+                        onClick={() => setFilterDateMonitoring('')}
+                        className="px-4 bg-red-100 text-red-600 rounded-xl text-[10px] font-black uppercase"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[8px] text-slate-400 italic">* Kosongkan untuk melihat semua riwayat laporan</p>
+                </div>
+              </div>
+
+              {/* --- DAFTAR LAPORAN DENGAN LOGIKA FILTER --- */}
+              {logs
+                .filter(log => {
+                  if (!filterDateMonitoring) return true;
+                  // Logika menyamakan format tanggal database dengan input kalender
+                  try {
+                    const logDate = log.timestamp.toDate().toISOString().split('T')[0];
+                    return logDate === filterDateMonitoring;
+                  } catch (e) { return false; }
+                })
+                .map(log => (
                 <div key={log.id} className="p-5 bg-white rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col gap-2">
                    <div className="flex justify-between items-center">
                      <div className="flex items-center gap-2">
@@ -389,7 +424,6 @@ export default function App() {
                      </div>
                      <div className="flex items-center gap-2">
                         <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase ${log.approval === 'Setuju' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-600'}`}>{log.approval}</span>
-                        {/* POIN 4: TOMBOL HAPUS LOG UNTUK CLEANING */}
                         <button onClick={() => handleDeleteLog(log.id)} className="text-[14px] opacity-20 hover:opacity-100">🗑️</button>
                      </div>
                    </div>
